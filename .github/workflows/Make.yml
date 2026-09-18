@@ -1,3 +1,4 @@
+
 name: Make Recovery
 
 on:
@@ -32,6 +33,9 @@ on:
         required: true
         default: 'J706F'
 
+permissions:
+  contents: write
+
 env:
   TZ: Asia/Shanghai
 
@@ -39,7 +43,7 @@ jobs:
   build:
     if: github.event.repository.owner.id == github.event.sender.id
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Maximize GitHub Runner Space
       uses: justinthelaw/maximize-github-runner-space@v0.8.0
@@ -49,9 +53,16 @@ jobs:
         remove-codeql: "true"
         remove-cached-tools: "true"
         remove-docker-images: "true"
-    
+
     - name: Check Out
       uses: actions/checkout@main
+
+    - name: Cache ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.ccache
+        key: ccache-${{ github.run_id }}
+        restore-keys: ccache-
 
     - name: Prepare the environment
       run: |
@@ -70,36 +81,36 @@ jobs:
         rsync schedtool squashfs-tools xsltproc zip zlib1g-dev imagemagick libbz2-dev libssl-dev \
         lzma ncftp bash-completion python-is-python3 openjdk-8-jdk qemu-user-static
         java -version
-        
+
     - name: Set variables
       run: |
-        echo "::set-output name=date::$(date +%F)"
+        echo "date=$(date +%F)" >> $GITHUB_OUTPUT
       id: var
-      
+
     - name: Install repo
       run: |
         mkdir ~/bin
         curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
         chmod a+x ~/bin/repo
         export PATH=~/bin:$PATH
-      
+
     - name: Initialize repo
       run: |
         PATH=~/bin:$PATH
         mkdir workspace
         cd workspace
-        echo "::set-output name=pwd::$(pwd)"
+        echo "pwd=$(pwd)" >> $GITHUB_OUTPUT
         git config --global user.name "Hikaru's Action-Build-Bot"
         git config --global user.email "Android@teio.tk"
         repo init --depth=1 -u ${{ github.event.inputs.LIBRARY_URL }} -b ${{ github.event.inputs.LIBRARY_BRANCH }}
       id: pwd
-          
+
     - name: Repo Sync
       run: |
         PATH=~/bin:$PATH
         cd workspace
         repo sync -j$(nproc --all)
-      
+
     - name: Clone device
       run: |
         PATH=~/bin:$PATH
@@ -112,13 +123,25 @@ jobs:
         cd ${{ steps.pwd.outputs.pwd }}
         export ALLOW_MISSING_DEPENDENCIES=true
         export LC_ALL=C
+        export USE_CCACHE=1
+        export CCACHE_EXEC=/usr/bin/ccache
+        ccache -M 50G
         source build/envsetup.sh
         lunch ${{ github.event.inputs.LIBRARY_NAME }}_${{ github.event.inputs.DEVICE_NAME }}-eng
         make clean
         make recoveryimage -j$(nproc --all)
-        
+
+    - name: Upload recovery artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: recovery-${{ github.event.inputs.DEVICE_NAME }}
+        path: workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.img
+        if-no-files-found: warn
+
     - name: Upload to Release
-      uses: softprops/action-gh-release@v1
+      if: success()
+      uses: softprops/action-gh-release@v2
       with:
         files: workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.img
         name: ${{ github.event.inputs.DEVICE_NAME }}-${{ github.run_id }}
