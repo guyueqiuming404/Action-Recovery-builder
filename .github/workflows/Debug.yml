@@ -1,0 +1,126 @@
+name: Debug Makefile
+
+on:
+  workflow_dispatch:
+    inputs:
+      LIBRARY_NAME:
+        description: 'LIBRARY_NAME'
+        required: true
+        default: 'twrp'
+      LIBRARY_URL:
+        description: 'LIBRARY_URL'
+        required: true
+        default: 'https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git'
+      LIBRARY_BRANCH:
+        description: 'LIBRARY_BRANCH'
+        required: true
+        default: 'twrp-11'
+      DEVICE_URL:
+        description: 'DEVICE_URL'
+        required: true
+        default: 'https://github.com/HK4567/twrp_device_lenovo_TB-J706F.git'
+      DEVICE_BRANCH:
+        description: 'DEVICE_BRANCH'
+        required: true
+        default: 'Android-11-test'
+      DEVICE_PATH:
+        description: 'DEVICE_PATH'
+        required: true
+        default: 'device/lenovo/J706F'
+      DEVICE_NAME:
+        description: 'DEVICE_NAME'
+        required: true
+        default: 'J706F'
+
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  debug:
+    if: github.event.repository.owner.id == github.event.sender.id
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Maximize GitHub Runner Space
+      uses: justinthelaw/maximize-github-runner-space@v0.8.0
+      with:
+        cleanup-profile: custom
+        remove-android: "true"
+        remove-codeql: "true"
+        remove-cached-tools: "true"
+        remove-docker-images: "true"
+
+    - name: Check Out
+      uses: actions/checkout@main
+
+    - name: Prepare the environment
+      run: |
+        sudo apt update
+        sudo apt -y install git curl python3
+
+    - name: Install repo
+      run: |
+        mkdir ~/bin
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+        chmod a+x ~/bin/repo
+        export PATH=~/bin:$PATH
+
+    - name: Initialize repo
+      run: |
+        PATH=~/bin:$PATH
+        mkdir workspace
+        cd workspace
+        echo "pwd=$(pwd)" >> $GITHUB_OUTPUT
+        git config --global user.name "Debug"
+        git config --global user.email "debug@local"
+        repo init --depth=1 -u ${{ github.event.inputs.LIBRARY_URL }} -b ${{ github.event.inputs.LIBRARY_BRANCH }}
+      id: pwd
+
+    - name: Repo Sync
+      run: |
+        PATH=~/bin:$PATH
+        cd workspace
+        repo sync -j$(nproc --all)
+
+    - name: Debug Makefile
+      run: |
+        cd ${{ steps.pwd.outputs.pwd }}
+
+        echo "==================================================="
+        echo "===== 1. header_version 相关行 ====="
+        echo "==================================================="
+        grep -n "header_version" build/make/core/Makefile || true
+
+        echo ""
+        echo "==================================================="
+        echo "===== 2. 所有 1+ 出现的地方 ====="
+        echo "==================================================="
+        grep -n "1+" build/make/core/Makefile || true
+
+        echo ""
+        echo "==================================================="
+        echo "===== 3. BOARD_MKBOOTIMG_ARGS 相关行 ====="
+        echo "==================================================="
+        grep -n "BOARD_MKBOOTIMG_ARGS" build/make/core/Makefile || true
+
+        echo ""
+        echo "==================================================="
+        echo "===== 4. BOARD_BOOT_HEADER_VERSION 相关行 ====="
+        echo "==================================================="
+        grep -n "BOARD_BOOT_HEADER_VERSION" build/make/core/Makefile || true
+
+        echo ""
+        echo "==================================================="
+        echo "===== 5. 所有 Makefile 里的 header_version ====="
+        echo "==================================================="
+        grep -rn "header_version" build/make/core/*.mk || true
+
+        echo ""
+        echo "==================================================="
+        echo "===== 6. MKBOOTIMG 变量定义 ====="
+        echo "==================================================="
+        grep -n "MKBOOTIMG" build/make/core/Makefile | head -40 || true
+
+        echo ""
+        echo "===== DONE ====="
+        exit 1
